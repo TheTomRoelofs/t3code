@@ -2,6 +2,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 
 import {
   GitManagerError,
@@ -170,6 +171,7 @@ export const make = Effect.gen(function* () {
   const git = yield* GitVcsDriver.GitVcsDriver;
   const gitManager = yield* GitManager.GitManager;
   const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const projectScripts = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
 
   const ensureGit = Effect.fn("GitWorkflowService.ensureGit")(function* (
@@ -199,15 +201,17 @@ export const make = Effect.gen(function* () {
   const realPathOr = (value: string) =>
     fileSystem.realPath(value).pipe(Effect.orElseSucceed(() => value));
 
-  // Only a worktree linked to `cwd` runs the remove action. Any other path,
-  // such as the main checkout, would run it where the removal then refuses.
-  const isLinkedWorktree = Effect.fn("GitWorkflowService.isLinkedWorktree")(function* (
+  // `path` resolved against `cwd`, as Git resolves it, when it is a worktree
+  // linked to `cwd`. Any other path, such as the main checkout, gets no remove
+  // action, because the removal then refuses it.
+  const linkedWorktreePath = Effect.fn("GitWorkflowService.linkedWorktreePath")(function* (
     input: VcsRemoveWorktreeInput,
   ) {
-    const target = yield* realPathOr(input.path);
+    const worktreePath = path.resolve(input.cwd, input.path);
+    const target = yield* realPathOr(worktreePath);
     // `git worktree list` starts with the main worktree.
     const linked = (yield* git.listWorktreePaths(input.cwd)).slice(1);
-    return (yield* Effect.forEach(linked, realPathOr)).includes(target);
+    return (yield* Effect.forEach(linked, realPathOr)).includes(target) ? worktreePath : null;
   });
 
   const ensureGitCommand = Effect.fn("GitWorkflowService.ensureGitCommand")(function* (
@@ -401,14 +405,11 @@ export const make = Effect.gen(function* () {
       ),
     removeWorktreeWithAction: (input) =>
       ensureGitCommand("GitWorkflowService.removeWorktreeWithAction", input.cwd).pipe(
-        Effect.andThen(isLinkedWorktree(input)),
-        Effect.flatMap((linked) =>
-          linked
-            ? projectScripts.runBeforeWorktreeRemove({
-                projectCwd: input.cwd,
-                worktreePath: input.path,
-              })
-            : Effect.void,
+        Effect.andThen(linkedWorktreePath(input)),
+        Effect.flatMap((worktreePath) =>
+          worktreePath === null
+            ? Effect.void
+            : projectScripts.runBeforeWorktreeRemove({ projectCwd: input.cwd, worktreePath }),
         ),
         Effect.andThen(git.removeWorktree(input)),
       ),
