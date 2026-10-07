@@ -31,6 +31,7 @@ import * as GitManager from "./git/GitManager.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "./orchestration-v2/ProjectionStore.ts";
+import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
 import { threadHasQueuedTurnStart } from "./orchestration-v2/ThreadSettlementService.ts";
 import { forkParked } from "./serverActivation.ts";
 import * as Settings from "./serverSettings.ts";
@@ -116,6 +117,7 @@ export const make = Effect.gen(function* () {
   const git = yield* GitVcsDriver.GitVcsDriver;
   const gitManager = yield* GitManager.GitManager;
   const terminals = yield* TerminalManager.TerminalManager;
+  const projectScripts = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const liveTerminals = new Map<string, Map<string, TerminalSummary>>();
@@ -387,6 +389,11 @@ export const make = Effect.gen(function* () {
           )
         )
           return;
+        yield* projectScripts.runBeforeWorktreeRemove({
+          projectId: thread.projectId,
+          projectCwd: project.workspaceRoot,
+          worktreePath,
+        });
         yield* git.removeWorktree({ cwd: project.workspaceRoot, path: worktreePath, force: false });
         yield* gitManager.invalidateStatus(project.workspaceRoot);
         // Preserve branch and path: ProviderTurnStartService recreates the checkout
