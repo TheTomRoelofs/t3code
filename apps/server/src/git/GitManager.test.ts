@@ -824,6 +824,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               Layer.provide(VcsProcess.layer),
             ),
           ),
+          Layer.provide(Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({})),
         ),
       );
       const broadcasterContext = yield* Layer.build(
